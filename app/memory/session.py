@@ -163,6 +163,13 @@ class RedisSessionMemory(BaseSessionMemory):
         self.window_size = window_size or settings.session_window_size
         self.ttl = ttl_seconds or settings.session_ttl_seconds
         self._key_prefix = "intelliflow:session:"
+        self._script = self.client.register_script(
+            """
+            redis.call('RPUSH', KEYS[1], ARGV[1])
+            redis.call('LTRIM', KEYS[1], ARGV[2], -1)
+            redis.call('EXPIRE', KEYS[1], ARGV[3])
+            """
+        )
 
         # 测试连接
         try:
@@ -189,11 +196,7 @@ class RedisSessionMemory(BaseSessionMemory):
             "timestamp": time.time(),
         }, ensure_ascii=False)
         
-        pipe = self.client.pipeline()
-        pipe.rpush(key, msg)
-        pipe.ltrim(key, -self.window_size, -1)  # 保留最后 N 条
-        pipe.expire(key, self.ttl)
-        pipe.execute()
+        self._script(keys=[key], args=[msg, -self.window_size, self.ttl])
 
     def add_tool_event(self, session_id: str, tool_name: str, content: str) -> None:
         key = self._get_key(session_id)
@@ -204,11 +207,7 @@ class RedisSessionMemory(BaseSessionMemory):
             "timestamp": time.time(),
         }, ensure_ascii=False)
         
-        pipe = self.client.pipeline()
-        pipe.rpush(key, msg)
-        pipe.ltrim(key, -self.window_size, -1)
-        pipe.expire(key, self.ttl)
-        pipe.execute()
+        self._script(keys=[key], args=[msg, -self.window_size, self.ttl])
 
     def get_recent(self, session_id: str) -> List[dict]:
         key = self._get_key(session_id)

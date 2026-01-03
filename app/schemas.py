@@ -77,3 +77,29 @@ class UrlIngestRequest(BaseModel):
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
 
+
+class ToolDecision(BaseModel):
+    """
+    LLM 输出的工具调用决策（结构化输出）。
+    用于意图识别后决定是否发布、发布到哪里。
+    """
+    action: str = Field(
+        description="决策动作: 'none'=不发布, 'publish'=执行发布, 'ask_destination'=询问用户发布位置"
+    )
+    destination: Optional[str] = Field(
+        default=None,
+        description="发布目标: 'local' | 'github' | null"
+    )
+    path: Optional[str] = Field(
+        default=None,
+        description="发布路径，如 'output.md' 或 'content/article.md'"
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="决策理由（用于调试/日志）"
+    )
+    pending_content: Optional[str] = Field(
+        default=None,
+        description="待发布的完整内容（当 action='ask_destination' 时暂存，等用户确认后发布）"
+    )
+

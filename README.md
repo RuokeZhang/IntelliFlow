@@ -2,41 +2,7 @@
 
 最小可运行示例，涵盖：FastAPI、pgvector RAG、会话记忆、代理编排、SSE、MCP 工具（GitHub 发布 + 本地文件写入）、APScheduler 定时任务。
 
-## 快速开始
-1. 安装依赖  
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. 配置环境变量（可复制 `.env.example`）：  
-   - `DATABASE_URL`：Postgres，需启用 pgvector 扩展。  
-   - `OPENAI_API_KEY`：用于嵌入和对话。  
-   - `GITHUB_TOKEN`/`GITHUB_REPO`：可选，启用 GitHub 发布。  
-3. 初始化 DB 表：启动服务时自动建表。
-4. 导入示例数据：  
-   ```bash
-   python -m scripts.ingest_sample
-   ```
-5. 运行 API：  
-   ```bash
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
 
-## 主要端点
-- `GET /health`：健康检查  
-- `POST /rag/query`：RAG 问答（`stream=true` 开启 SSE）  
-- `POST /agents/run`：代理编排，支持发布（GitHub/local，`stream=true` 开启 SSE）  
-- `GET /agents/memory/{session_id}`：查看最近窗口与摘要
-
-示例请求（代理发布到本地）：  
-```bash
-curl -X POST http://localhost:8000/agents/run \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "写一段关于IntelliFlow的简短介绍，Markdown输出",
-    "session_id": "demo",
-    "publish": {"mode": "local", "path": "demo/output.md"}
-  }'
-```
 
 ## 架构要点
 - RAG：Tika 解析 → 结构感知/Token 分块 → OpenAI 向量 → pgvector 粗排 → Cohere Rerank 精排。  
@@ -51,19 +17,9 @@ curl -X POST http://localhost:8000/agents/run \
 
 在 `.env` 中配置 `COHERE_API_KEY` 即可开启精排功能。若未配置，系统将自动降级为纯向量检索。
 
-## 运行需求
-- Postgres (pgvector 已安装)  
-- Python 3.10+  
-- 可选：Java 环境用于 `tika`（若使用 Tika 解析），否则可自备纯文本/Markdown。
-
-## 测试
-- 默认跳过集成测试；设置 `RUN_DB_TESTS=1` 且提供可用 `DATABASE_URL` 后运行：
-  ```bash
-  RUN_DB_TESTS=1 pytest -q
-  ```
 
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
 
 
 ```shell
@@ -104,3 +60,51 @@ curl -X POST http://localhost:8000/rag/query \
     "top_k": 3
   }'
 ```
+## 构建上下文
+1. 用户query改写，改写为更适合RAG检索的短句
+2. 检索获得相关的chunk
+3. 在memory_summaries表中，对用户query执行向量相似度检索，获取相关的聊天summry
+
+## Session
+- 基于时间拆分。聊天记录被实时添加到Redis中，并且一个session只保留固定数量条聊天记录，添加和删除聊天记录用Lua脚本实现
+  ![alt text](image/session_redis.png)
+
+- session中的消息达到一定阈值之后，持久化到数据库
+
+  ![alt text](/image/summary_table.png)
+
+## MCP
+### save as a local file
+Example: Explicitly specify publishing to a local file
+```shell
+curl -X POST http://localhost:8000/agents/run -H "Content-Type: application/json" -d '{"session_id":"test-intent-002","prompt":"write a tech blog about chunking strategy and save as local markdown file, using a suitable filename"}'
+```
+![alt text](/image/local_file.png)
+
+### let it generate a file, not specifing where to save
+
+```shell
+curl -X POST http://localhost:8000/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "multi-turn-002",
+    "prompt": "local"
+  }'
+```
+Agent will ask you if you want to save it as a local file or publish it to GitHub
+
+File content will be stored in Redis temporarily.
+![alt text](image/agent_ask.png)
+
+Answer agent's question
+
+```shell
+curl -X POST http://localhost:8000/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "multi-turn-002",
+    "prompt": "local"
+  }'
+```
+you can now see the pending state is cleared, and a local file is generated
+![alt text](image/pending_cleared.png)
